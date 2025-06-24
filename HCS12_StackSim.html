@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HCS12 Stack Simulator v2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Tailwind gray-900 */
+            color: #d1d5db; /* Tailwind gray-300 */
+        }
+        .mono {
+            font-family: 'Roboto Mono', monospace;
+        }
+        .stack-item, .call-stack-item {
+            transition: all 0.3s ease-in-out;
+            border-color: #374151; /* gray-700 */
+        }
+        .stack-item-param { background-color: #1d4ed8; border-color: #2563eb; } /* blue-700, blue-500 */
+        .stack-item-return { background-color: #be123c; border-color: #e11d48; } /* rose-700, rose-500 */
+        .stack-item-local { background-color: #15803d; border-color: #16a34a; } /* green-700, green-600 */
+        .stack-item-register { background-color: #a16207; border-color: #ca8a04; } /* yellow-700, yellow-500 */
+        .stack-item-empty { background-color: #374151; border-color: #4b5563; } /* gray-700, gray-600 */
+
+        .sp-pointer {
+            transition: top 0.3s ease-in-out;
+        }
+        .btn {
+            transition: all 0.2s ease;
+        }
+        .btn-disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .tooltip {
+            position: fixed;
+            background-color: #1f2937;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid #4b5563;
+            font-size: 0.875rem;
+            z-index: 1000;
+            pointer-events: none;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            white-space: pre;
+            max-width: 350px;
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f2937; /* gray-800 */
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563; /* gray-600 */
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280; /* gray-500 */
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-white">HCS12 Stack Simulator</h1>
+            <p class="mt-2 text-lg text-gray-400">© Leon Weigel, 2025   - Experimental: Use with caution!</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+            <!-- Controls Column -->
+            <div class="lg:col-span-1 bg-gray-800 p-6 rounded-xl shadow-lg flex flex-col space-y-6">
+                <!-- Stack Setup -->
+                <div>
+                    <h2 class="text-xl font-semibold text-white mb-4 border-b border-gray-600 pb-2">Stack Setup</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <label for="stack-start" class="block text-sm font-medium text-gray-300">Stack Start Address (EOS)</label>
+                            <input type="text" id="stack-start" value="3F00" class="mono mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Function Library -->
+                <div>
+                    <h2 class="text-xl font-semibold text-white mb-4 border-b border-gray-600 pb-2">Function Library</h2>
+                    <div id="function-library-list" class="space-y-2 max-h-60 overflow-y-auto pr-2"></div>
+                    <button id="add-function-btn" class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md btn">
+                        Add New Function
+                    </button>
+                </div>
+
+                <!-- Actions -->
+                <div>
+                    <h2 class="text-xl font-semibold text-white mb-4 border-b border-gray-600 pb-2">Actions</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <label for="call-function-select" class="block text-sm font-medium text-gray-300">Select Function to Call</label>
+                            <select id="call-function-select" class="mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white"></select>
+                        </div>
+                        <button id="call-selected-function-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md btn">Call Selected Function</button>
+                    </div>
+                </div>
+                
+                <!-- Interrupt Controls -->
+                <div>
+                    <h2 class="text-xl font-semibold text-white mb-4 border-b border-gray-600 pb-2">Interrupt Control</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <label for="interrupt-select" class="block text-sm font-medium text-gray-300">Select Interrupt</label>
+                            <select id="interrupt-select" class="mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white"></select>
+                        </div>
+                        <button id="request-interrupt-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md btn">Request Interrupt</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Visualization Column -->
+            <div class="lg:col-span-2 bg-gray-800 p-6 rounded-xl shadow-lg">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- Stack Visualization -->
+                    <div class="md:col-span-2 relative">
+                        <h2 class="text-xl font-semibold text-white mb-4 text-center">Stack Memory (256 Bytes)</h2>
+                        <div id="stack-container" class="relative bg-gray-900 p-4 rounded-lg h-[640px] overflow-y-auto">
+                            <div id="sp-pointer" class="sp-pointer absolute right-full top-0 mr-2 flex items-center h-8">
+                                <span class="mono text-yellow-400 font-bold">SP →</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Registers, Legend, and Call Stack -->
+                    <div class="md:col-span-1 flex flex-col space-y-6">
+                        <div>
+                            <h2 class="text-xl font-semibold text-white mb-4 text-center">CPU Registers</h2>
+                            <div id="register-display" class="grid grid-cols-2 gap-2 bg-gray-900 p-4 rounded-lg text-sm"></div>
+                        </div>
+                        <div>
+                            <h2 class="text-xl font-semibold text-white mb-4 text-center">Call Stack</h2>
+                            <div id="call-stack-display" class="space-y-1 bg-gray-900 p-3 rounded-lg text-sm h-40 overflow-y-auto"></div>
+                        </div>
+                        <div>
+                            <h2 class="text-xl font-semibold text-white mb-4 text-center">Legend</h2>
+                            <div class="space-y-2 bg-gray-900 p-4 rounded-lg">
+                                <div class="flex items-center"><div class="w-4 h-4 rounded-sm mr-2 stack-item-param"></div><span>Function Parameter</span></div>
+                                <div class="flex items-center"><div class="w-4 h-4 rounded-sm mr-2 stack-item-return"></div><span>Return Address</span></div>
+                                <div class="flex items-center"><div class="w-4 h-4 rounded-sm mr-2 stack-item-local"></div><span>Local Variable</span></div>
+                                <div class="flex items-center"><div class="w-4 h-4 rounded-sm mr-2 stack-item-register"></div><span>Saved Register (ISR)</span></div>
+                                <div class="flex items-center"><div class="w-4 h-4 rounded-sm mr-2 stack-item-empty"></div><span>Unused / Empty</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Explanation and Controls Panel -->
+        <div class="mt-8 bg-gray-800 p-6 rounded-xl shadow-lg">
+            <h2 class="text-xl font-semibold text-white mb-4 border-b border-gray-600 pb-2">Simulation Log & Control</h2>
+            <div class="flex items-center justify-between">
+                <p id="explanation" class="text-md text-gray-200 flex-grow pr-4 mono leading-relaxed">Welcome! Define a function and press an action button.</p>
+                <div class="flex space-x-2 flex-shrink-0">
+                    <button id="step-btn" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-md btn btn-disabled" disabled>Step</button>
+                    <button id="reset-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md btn">Reset Sim</button>
+                    <button id="clear-all-btn" class="bg-red-800 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md btn">Clear All</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Function Definition Modal -->
+    <div id="function-modal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 hidden z-50">
+        <div class="bg-gray-900 rounded-lg shadow-xl p-8 w-full max-w-4xl space-y-6 border-2 border-indigo-500 max-h-[90vh] flex flex-col">
+            <h3 id="function-modal-title" class="text-2xl font-bold leading-6 text-white">Define Function</h3>
+            <div class="flex-grow overflow-y-auto pr-4 grid grid-cols-1 md:grid-cols-2 gap-x-8">
+                <!-- Left Column: Name, Params -->
+                <div class="space-y-6">
+                    <div>
+                        <label for="modal-function-name" class="block text-sm font-medium text-gray-300">Function Name</label>
+                        <input type="text" id="modal-function-name" class="mono mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white">
+                    </div>
+                    <div>
+                        <h4 class="text-lg font-semibold text-white mb-2">Parameters</h4>
+                        <div id="modal-param-list" class="space-y-2 max-h-40 overflow-y-auto pr-2 bg-gray-800 p-2 rounded"></div>
+                        <button id="modal-add-param-btn" class="mt-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md btn">Add Parameter</button>
+                    </div>
+                </div>
+                <!-- Right Column: Function Body -->
+                <div class="space-y-6">
+                    <div>
+                        <h4 class="text-lg font-semibold text-white mb-2">Function Body (Execution Steps)</h4>
+                        <div id="modal-body-list" class="space-y-2 max-h-[60vh] overflow-y-auto pr-2 bg-gray-800 p-2 rounded"></div>
+                    </div>
+                    <div class="bg-gray-800 p-3 rounded">
+                        <label for="modal-add-step-select" class="block text-sm font-medium text-gray-300">Add Step to Body:</label>
+                        <div class="flex items-center space-x-2 mt-1">
+                            <select id="modal-add-step-select" class="block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white">
+                                <!-- Options populated by JS -->
+                            </select>
+                            <button id="modal-add-step-btn" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-md btn">Add</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-end space-x-3 pt-4 border-t border-gray-700">
+                <button id="cancel-function-modal-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md btn">Cancel</button>
+                <button id="save-function-modal-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md btn">Save Function</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Parameter Instance Modal (for CALL steps) -->
+    <div id="call-params-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 hidden z-[60]">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-lg space-y-4">
+            <h3 id="call-params-modal-title" class="text-lg font-medium leading-6 text-white">Set Parameters for Call</h3>
+            <div id="call-params-list" class="space-y-4 max-h-60 overflow-y-auto pr-2"></div>
+            <div class="flex justify-end space-x-3 pt-4">
+                <button id="cancel-call-params-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md btn">Cancel</button>
+                <button id="save-call-params-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md btn">Save Call</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Universal Variable Editor Modal -->
+    <div id="variable-editor-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 hidden z-[60]">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md space-y-4">
+            <h3 id="variable-editor-title" class="text-lg font-medium leading-6 text-white">Define Variable</h3>
+            <div>
+                <label for="variable-editor-name" class="block text-sm font-medium text-gray-300">Name</label>
+                <input type="text" id="variable-editor-name" class="mono mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white">
+            </div>
+            <div>
+                <label for="variable-editor-type" class="block text-sm font-medium text-gray-300">Data Type</label>
+                <select id="variable-editor-type" class="mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white">
+                    <option value="char">char (1 byte)</option>
+                    <option value="int" selected>int (2 bytes)</option>
+                    <option value="long">long (4 bytes)</option>
+                </select>
+            </div>
+            <div id="variable-editor-value-group" class="space-y-4">
+                <div>
+                    <label for="variable-editor-format" class="block text-sm font-medium text-gray-300">Value Format</label>
+                    <select id="variable-editor-format" class="mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white">
+                        <option value="hex" selected>Hexadecimal</option>
+                        <option value="dec">Decimal</option>
+                        <option value="bin">Binary</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="variable-editor-value" class="block text-sm font-medium text-gray-300">Value</label>
+                    <input type="text" id="variable-editor-value" class="mono mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white">
+                </div>
+            </div>
+            <div class="flex justify-end space-x-3 pt-4">
+                <button id="cancel-variable-editor-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md btn">Cancel</button>
+                <button id="save-variable-editor-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md btn">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Modal -->
+    <div id="error-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 hidden z-[70]">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md space-y-4 border-2 border-red-500">
+            <h3 id="error-title" class="text-xl font-bold leading-6 text-red-400">Error</h3>
+            <p id="error-message" class="text-white"></p>
+            <div class="flex justify-end space-x-3 pt-4">
+                <button id="close-error-modal-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md btn">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Log Message Modal (New) -->
+    <div id="log-message-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 hidden z-[60]">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md space-y-4">
+            <h3 class="text-lg font-medium leading-6 text-white">Enter Log Message</h3>
+            <div>
+                <label for="log-message-input" class="block text-sm font-medium text-gray-300">Message</label>
+                <input type="text" id="log-message-input" class="mono mt-1 block w-full bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white" value="Doing some work...">
+            </div>
+            <div class="flex justify-end space-x-3 pt-4">
+                <button id="cancel-log-message-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md btn">Cancel</button>
+                <button id="save-log-message-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md btn">Save Log</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="tooltip" class="tooltip hidden"></div>
+    <div id="ccr-tooltip" class="tooltip hidden"></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+    // --- DOM Elements ---
+    const stackContainer = document.getElementById('stack-container');
+    const spPointer = document.getElementById('sp-pointer');
+    const registerDisplay = document.getElementById('register-display');
+    const callStackDisplay = document.getElementById('call-stack-display');
+    const explanationEl = document.getElementById('explanation');
+    const stackStartEl = document.getElementById('stack-start');
+    const tooltipEl = document.getElementById('tooltip');
+    const ccrTooltipEl = document.getElementById('ccr-tooltip');
+    
+    // Main page controls
+    const functionLibraryListEl = document.getElementById('function-library-list');
+    const addFunctionBtn = document.getElementById('add-function-btn');
+    const callFunctionSelect = document.getElementById('call-function-select');
+    const callSelectedFunctionBtn = document.getElementById('call-selected-function-btn');
+    const interruptSelect = document.getElementById('interrupt-select');
+    const requestInterruptBtn = document.getElementById('request-interrupt-btn');
+    const stepBtn = document.getElementById('step-btn');
+    const resetBtn = document.getElementById('reset-btn');
+    const clearAllBtn = document.getElementById('clear-all-btn');
+
+    // Function Definition Modal
+    const functionModal = document.getElementById('function-modal');
+    const functionModalTitleEl = document.getElementById('function-modal-title');
+    const modalFunctionNameEl = document.getElementById('modal-function-name');
+    const modalParamListEl = document.getElementById('modal-param-list');
+    const modalAddParamBtn = document.getElementById('modal-add-param-btn');
+    const modalBodyListEl = document.getElementById('modal-body-list');
+    const modalAddStepSelect = document.getElementById('modal-add-step-select');
+    const modalAddStepBtn = document.getElementById('modal-add-step-btn');
+    const cancelFunctionModalBtn = document.getElementById('cancel-function-modal-btn');
+    const saveFunctionModalBtn = document.getElementById('save-function-modal-btn');
+    
+    // Nested Modals
+    const variableEditorModal = document.getElementById('variable-editor-modal');
+    const variableEditorTitleEl = document.getElementById('variable-editor-title');
+    const variableEditorNameEl = document.getElementById('variable-editor-name');
+    const variableEditorTypeEl = document.getElementById('variable-editor-type');
+    const variableEditorValueGroup = document.getElementById('variable-editor-value-group');
+    const variableEditorFormatEl = document.getElementById('variable-editor-format');
+    const variableEditorValueEl = document.getElementById('variable-editor-value');
+    const cancelVariableEditorBtn = document.getElementById('cancel-variable-editor-btn');
+    const saveVariableEditorBtn = document.getElementById('save-variable-editor-btn');
+
+    const callParamsModal = document.getElementById('call-params-modal');
+    const callParamsModalTitleEl = document.getElementById('call-params-modal-title');
+    const callParamsListEl = document.getElementById('call-params-list');
+    const cancelCallParamsBtn = document.getElementById('cancel-call-params-btn');
+    const saveCallParamsBtn = document.getElementById('save-call-params-btn');
+    
+    const errorModal = document.getElementById('error-modal');
+    const errorTitleEl = document.getElementById('error-title');
+    const errorMessageEl = document.getElementById('error-message');
+    const closeErrorModalBtn = document.getElementById('close-error-modal-btn');
+
+    // New Log Message Modal Elements
+    const logMessageModal = document.getElementById('log-message-modal');
+    const logMessageInput = document.getElementById('log-message-input');
+    const cancelLogMessageBtn = document.getElementById('cancel-log-message-btn');
+    const saveLogMessageBtn = document.getElementById('save-log-message-btn');
+
+    // --- State Variables ---
+    let STACK_SIZE = 256;
+    let STACK_START_ADDRESS = 0x3F00;
+    let STACK_BOTTOM_ADDRESS = STACK_START_ADDRESS - STACK_SIZE + 1;
+    let stack;
+    let registers;
+    let functionLibrary = {};
+    let callStack = [];
+    let pendingInterrupts = [];
+    let isSimulationRunning = false;
+    let currentlyEditingFunction = null;
+    let originalFunctionName = null;
+    let tempCallStep = null;
+    let variableEditorMode = 'param'; // 'param' or 'local'
+    let _isSettingInitialCall = false;
+
+
+    // --- HCS12 Interrupt Definitions ---
+    const interruptVectorTable = {
+        'RTI_TIMER': { name: 'Real Time Interrupt', priority: 1, vector: 0xFFF0, isMaskable: true, buildISR: () => [{ action: () => { registers.A ^= 0xFF; }, explanation: `RTI ISR: Toggling Register A.` }] },
+        'IRQ': { name: 'External IRQ', priority: 2, vector: 0xFFF2, isMaskable: true, buildISR: () => [{ action: () => { registers.Y++; }, explanation: `IRQ ISR: Incrementing register Y.` }] },
+        'XIRQ': { name: 'Non-Maskable IRQ', priority: 3, vector: 0xFFF4, isMaskable: false, buildISR: () => [{ action: () => { registers.X = 0xDEAD; }, explanation: `XIRQ ISR: Loading 0xDEAD into X.` }] },
+        'SWI': { name: 'Software Interrupt', priority: 4, vector: 0xFFF6, isMaskable: false, buildISR: () => [{ action: () => { registers.A = 0xDE; registers.B = 0xAD; }, explanation: `SWI ISR: Loading 0xDEAD into D register.` }] },
+    };
+
+    // --- Utility & Tooltip Functions ---
+    const toHex = (val, pad=4) => {
+        if (typeof val === 'undefined' || val === null) return '0x????';
+        return `0x${val.toString(16).toUpperCase().padStart(pad, '0')}`;
+    }
+    const updateExplanation = (text) => { explanationEl.textContent = text; };
+    const getTypeSize = (type) => {
+        switch(type) { case 'char': return 1; case 'int': return 2; case 'long': return 4; default: return 0; }
+    };
+    function setControlsEnabled(preSimControlsAreEnabled) {
+        const controls = [addFunctionBtn, callSelectedFunctionBtn];
+        controls.forEach(control => { 
+            control.disabled = !preSimControlsAreEnabled; 
+            control.classList.toggle('btn-disabled', !preSimControlsAreEnabled);
+        });
+        
+        requestInterruptBtn.disabled = preSimControlsAreEnabled;
+        requestInterruptBtn.classList.toggle('btn-disabled', preSimControlsAreEnabled);
+    }
+    function showErrorModal(title, message) {
+        errorTitleEl.textContent = title;
+        errorMessageEl.textContent = message;
+        errorModal.classList.remove('hidden');
+    }
+    function showTooltip(event, address, size) {
+        let content = '';
+        const index = STACK_START_ADDRESS - address;
+        if(index < 0 || index >= STACK_SIZE || !stack[index] || stack[index].type === 'empty') {
+            hideTooltip();
+            return;
+        }
+
+        const baseItem = stack[index];
+        const dataSize = baseItem.size;
+        
+        let fullValue = 0;
+        let binString = '';
+        for (let i = 0; i < dataSize; i++) {
+            const currentIdx = STACK_START_ADDRESS - (address - i);
+            if (currentIdx >= 0 && currentIdx < STACK_SIZE) {
+                const byteVal = stack[currentIdx].value;
+                fullValue = (fullValue << 8) | byteVal;
+                binString += byteVal.toString(2).padStart(8, '0');
+            }
+        }
+
+        let signedVal = fullValue;
+        if(dataSize > 0) {
+            const signBit = 1 << (dataSize * 8 - 1);
+            if((signedVal & signBit) > 0) {
+                signedVal -= (1 << (dataSize * 8));
+            }
+        }
+        
+        content = `<div class="font-bold mono text-lg">${toHex(address)} - ${toHex(address-dataSize+1)}</div>
+                    <div class="text-sm text-gray-400 mb-2">${baseItem.description}</div>
+                    <div class="grid grid-cols-2 gap-x-4 mt-2">
+                        <span>Hex:</span> <span class="mono">${toHex(fullValue, dataSize*2)}</span>
+                        <span>Unsigned:</span> <span class="mono">${fullValue}</span>
+                        <span>Signed:</span> <span class="mono">${signedVal}</span>
+                        <span>Binary:</span> <span class="mono break-all">${binString}</span>
+                    </div>`;
+
+        tooltipEl.innerHTML = content;
+        tooltipEl.style.left = `${event.clientX + 15}px`;
+        tooltipEl.style.top = `${event.clientY + 15}px`;
+        tooltipEl.classList.remove('hidden');
+    }
+    function hideTooltip() { tooltipEl.classList.add('hidden'); }
+    function showCcrTooltip(event) {
+        const ccr = registers.CCR;
+        const flags = [
+            { name: 'S', bit: 7, desc: 'Stop Disable' }, { name: 'X', bit: 6, desc: 'X Interrupt Mask' },
+            { name: 'H', bit: 5, desc: 'Half Carry' }, { name: 'I', bit: 4, desc: 'I Interrupt Mask' },
+            { name: 'N', bit: 3, desc: 'Negative' }, { name: 'Z', bit: 2, desc: 'Zero' },
+            { name: 'V', bit: 1, desc: 'Overflow' }, { name: 'C', bit: 0, desc: 'Carry' }
+        ];
+        let content = `<div class="font-bold mono text-lg">CCR Flags</div>`;
+        flags.forEach(f => {
+            const value = (ccr >> f.bit) & 1;
+            content += `\n<span class="${value ? 'text-green-400' : 'text-red-400'}">${f.name}</span>: ${value}   (${f.desc})`;
+        });
+        ccrTooltipEl.innerHTML = content;
+        ccrTooltipEl.style.left = `${event.clientX + 15}px`;
+        ccrTooltipEl.style.top = `${event.clientY - ccrTooltipEl.offsetHeight - 5}px`;
+        ccrTooltipEl.classList.remove('hidden');
+    }
+    function hideCcrTooltip() { ccrTooltipEl.classList.add('hidden'); }
+
+
+    // --- Rendering Functions ---
+    function renderAll() {
+        renderStack();
+        renderRegisters();
+        renderSP();
+        renderCallStack();
+    }
+
+    function renderStack() {
+        stackContainer.innerHTML = ''; 
+        stackContainer.appendChild(spPointer);
+        stack.forEach(item => {
+            const itemEl = document.createElement('div');
+            itemEl.className = `stack-item h-8 flex items-center justify-between p-2 border-b rounded-t-md cursor-pointer`;
+            itemEl.classList.add(`stack-item-${item.type}`);
+            itemEl.innerHTML = `
+                <span class="mono text-xs text-gray-400">${toHex(item.address)}</span>
+                <span class="mono font-bold text-white text-sm truncate">${item.description}</span>
+                <span class="mono text-xs text-cyan-300">${toHex(item.value, 2)}</span>
+            `;
+            itemEl.addEventListener('mousemove', (e) => showTooltip(e, item.address, item.size));
+            itemEl.addEventListener('mouseleave', hideTooltip);
+            stackContainer.appendChild(itemEl);
+        });
+    }
+
+    function renderRegisters() {
+        const dReg = (registers.A << 8) | registers.B;
+        registerDisplay.innerHTML = `
+            <span class="text-gray-400">PC:</span> <span class="mono text-white">${toHex(registers.PC)}</span>
+            <span class="text-gray-400">SP:</span> <span class="mono text-white">${toHex(registers.SP)}</span>
+            <span class="text-gray-400">X:</span>  <span class="mono text-white">${toHex(registers.X)}</span>
+            <span class="text-gray-400">Y:</span>  <span class="mono text-white">${toHex(registers.Y)}</span>
+            <span class="text-gray-400">A:</span>  <span class="mono text-white">${toHex(registers.A, 2)}</span>
+            <span class="text-gray-400">B:</span>  <span class="mono text-white">${toHex(registers.B, 2)}</span>
+            <span class="text-gray-400">D:</span>  <span class="mono text-white">${toHex(dReg)}</span>
+            <span class="text-gray-400">CCR:</span><span id="ccr-value" class="mono text-white cursor-pointer">${toHex(registers.CCR, 2)}</span>
+        `;
+        const ccrValueEl = document.getElementById('ccr-value');
+        ccrValueEl.addEventListener('mousemove', showCcrTooltip);
+        ccrValueEl.addEventListener('mouseleave', hideCcrTooltip);
+    }
+
+    function renderSP() {
+        const offset = STACK_START_ADDRESS - registers.SP;
+        spPointer.style.top = `${offset * 32}px`; // 32px per stack item
+    }
+
+    function renderCallStack() {
+        callStackDisplay.innerHTML = '';
+        if (callStack.length === 0) {
+            callStackDisplay.innerHTML = `<p class="text-sm text-gray-500 text-center">Empty</p>`;
+            return;
+        }
+        [...callStack].reverse().forEach((context, index) => {
+            const itemEl = document.createElement('div');
+            const isTop = index === 0;
+            itemEl.className = `call-stack-item p-2 rounded-md text-xs ${isTop ? 'bg-indigo-900 ring-2 ring-indigo-500' : 'bg-gray-700'}`;
+            itemEl.innerHTML = `<div class="font-bold truncate">${context.name}</div><div class="text-gray-400">${context.type}</div>`;
+            callStackDisplay.appendChild(itemEl);
+        });
+    }
+    
+    function populateInterruptSelector() {
+        interruptSelect.innerHTML = '';
+        for (const key in interruptVectorTable) {
+            const option = document.createElement('option');
+            option.value = key;
+            option.textContent = interruptVectorTable[key].name;
+            interruptSelect.appendChild(option);
+        }
+    }
+    
+    // --- Stack Operations ---
+    function push(value, size, description, type) {
+        if (registers.SP - size < STACK_BOTTOM_ADDRESS) {
+            showErrorModal('Stack Overflow!', `Attempted to push ${size} bytes onto stack. SP would go from ${toHex(registers.SP)} to ${toHex(registers.SP - size)}, which is beyond the stack limit of ${toHex(STACK_BOTTOM_ADDRESS)}.`);
+            finishSimulation("Stack Overflow!");
+            return false;
+        }
+        for (let i = 0; i < size; i++) {
+            registers.SP--;
+            const stackIndex = STACK_START_ADDRESS - registers.SP;
+            const byteValue = (value >>> (8 * (size - 1 - i))) & 0xFF;
+            if (stack[stackIndex]) {
+                stack[stackIndex] = { 
+                    value: byteValue, 
+                    description: size > 1 ? `${description} [${size - 1 - i}]` : description, 
+                    type: type, 
+                    size: size, 
+                    address: registers.SP
+                };
+            }
+        }
+        return true;
+    }
+
+    function pop(size) {
+        if (registers.SP + size > STACK_START_ADDRESS) {
+             showErrorModal('Stack Underflow!', `Attempted to pop ${size} bytes from an empty or near-empty stack. SP would go from ${toHex(registers.SP)} to ${toHex(registers.SP + size)}, which is above the stack start of ${toHex(STACK_START_ADDRESS)}.`);
+            finishSimulation("Stack Underflow!");
+            return 0;
+        }
+        let value = 0;
+        for (let i = 0; i < size; i++) {
+            const stackIndex = STACK_START_ADDRESS - registers.SP;
+            if (stack[stackIndex]) {
+                value = (value << 8) | stack[stackIndex].value;
+                stack[stackIndex].description = 'Empty';
+                stack[stackIndex].type = 'empty';
+                stack[stackIndex].size = 1;
+            }
+            registers.SP++;
+        }
+        return value;
+    }
+
+    function deallocate(size) {
+        for (let i = 0; i < size; i++) {
+            const stackIndex = STACK_START_ADDRESS - registers.SP;
+            if (stack[stackIndex]) {
+                stack[stackIndex].description = 'Empty';
+                stack[stackIndex].type = 'empty';
+                stack[stackIndex].size = 1;
+            }
+            registers.SP++;
+        }
+    }
+
+    // --- Function & Interrupt Logic ---
+    function callFunction(functionName, instanceParams) {
+        const isRecursive = callStack.some(c => c.name.startsWith(functionName));
+        const functionDef = getFunctionDefinition(functionName);
+        if (!functionDef) {
+            showErrorModal("Function Not Found", `The function '${functionName}' is not defined in the library.`);
+            finishSimulation("Error: Function not found.");
+            return;
+        }
+        
+        const newContext = {
+            name: `${functionName}${isRecursive ? ' (recursive)' : ''}`,
+            type: 'function',
+            pc: 0,
+            returnAddress: registers.PC,
+            queue: [],
+            totalLocalSize: 0,
+        };
+        
+        const q = newContext.queue;
+        const jumpToAddr = 0xD000 + callStack.length * 0x100;
+        
+        // JSR pushes return address first, then jumps.
+        q.push({ 
+            action: () => { 
+                push(newContext.returnAddress, 2, 'Return Addr', 'return'); 
+                registers.PC = jumpToAddr; 
+            }, 
+            explanation: `JSR ${functionName}: Pushing return address, jumping to ${toHex(jumpToAddr)}.` 
+        });
+        
+        // Queue up all body steps, including nested calls and variable definitions
+        functionDef.body.forEach(step => {
+            if (step.type === 'CALL') {
+                 createFunctionCallSteps(q, step.functionName, step.instanceParams);
+            } else if (step.type === 'DEFINE_VAR') {
+                const size = getTypeSize(step.varType);
+                newContext.totalLocalSize += size;
+                q.push({ 
+                    action: () => push(step.value, size, `Local: ${step.name}`, 'local'), 
+                    explanation: `Define Local: Allocating ${size} byte(s) for '${step.name}' with value ${toHex(step.value, size * 2)}.` 
+                });
+            } else {
+                q.push(step);
+            }
+        });
+
+        // Add the single deallocation step at the end for all locals defined in this function
+        if (newContext.totalLocalSize > 0) {
+            q.push({ 
+                action: () => { deallocate(newContext.totalLocalSize); }, 
+                explanation: `Epilogue: Deallocating ${newContext.totalLocalSize} bytes of all local variables.` 
+            });
+        }
+        
+        q.push({ type: 'RTS', explanation: `RTS: Prepare to return from ${functionName}.` });
+        
+        callStack.push(newContext);
+    }
+    
+    function getFunctionDefinition(name) {
+        return functionLibrary[name];
+    }
+
+    function returnFromSubroutine() {
+        if (callStack.length === 0) return;
+        
+        const returnAddr = pop(2);
+        registers.PC = returnAddr;
+        
+        callStack.pop();
+    }
+
+    function requestInterrupt(name) {
+        if (!isSimulationRunning) {
+            showErrorModal("Simulation Not Running", "Cannot request an interrupt before the simulation has started.");
+            return;
+        }
+        if (!interruptVectorTable[name]) return;
+        pendingInterrupts.push(interruptVectorTable[name]);
+        updateExplanation(`Interrupt '${interruptVectorTable[name].name}' requested.`);
+    }
+
+    function handleInterrupts() {
+        if (pendingInterrupts.length === 0) return false;
+
+        const iMaskSet = (registers.CCR & 0x10) !== 0;
+        pendingInterrupts.sort((a, b) => a.priority - b.priority);
+        const interruptToService = pendingInterrupts.find(intr => !intr.isMaskable || !iMaskSet);
+
+        if (!interruptToService) return false;
+
+        pendingInterrupts = pendingInterrupts.filter(i => i !== interruptToService);
+        serviceInterrupt(interruptToService);
+        return true;
+    }
+
+    function serviceInterrupt(interrupt) {
+        const newContext = { name: interrupt.name, type: 'isr', pc: 0, queue: [] };
+        const q = newContext.queue;
+
+        q.push({ explanation: `${interrupt.name} detected! Stacking CPU context.`});
+        
+        q.push({ action: () => { push(registers.PC, 2, 'Saved PC', 'register'); }, explanation: 'Stacking PC' });
+        q.push({ action: () => { push(registers.Y, 2, 'Saved Y', 'register'); }, explanation: 'Stacking Y' });
+        q.push({ action: () => { push(registers.X, 2, 'Saved X', 'register'); }, explanation: 'Stacking X' });
+        q.push({ action: () => { push(registers.A, 1, 'Saved A', 'register'); }, explanation: 'Stacking A' });
+        q.push({ action: () => { push(registers.B, 1, 'Saved B', 'register'); }, explanation: 'Stacking B' });
+        q.push({ action: () => { push(registers.CCR, 1, 'Saved CCR', 'register'); }, explanation: 'Stacking CCR' });
+        
+        if (interrupt.isMaskable) {
+            q.push({ action: () => { registers.CCR |= 0x10; }, explanation: `Hardware sets I-bit in CCR.` });
+        }
+
+        q.push({ action: () => { registers.PC = interrupt.vector; }, explanation: `Jumping to ISR at ${toHex(interrupt.vector)}.` });
+        q.push(...interrupt.buildISR());
+        q.push({ type: 'RTI', explanation: `RTI: Prepare to return from ${interrupt.name}.` });
+
+        callStack.push(newContext);
+    }
+
+    function returnFromInterrupt() {
+        registers.CCR = pop(1);
+        registers.A = pop(1);
+        registers.B = pop(1);
+        registers.X = pop(2);
+        registers.Y = pop(2);
+        registers.PC = pop(2);
+        callStack.pop();
+    }
+
+    // --- Simulation Engine ---
+    function createFunctionCallSteps(queue, functionName, instanceParams) {
+        const functionDef = functionLibrary[functionName];
+        if (!functionDef) return;
+
+        const paramsToProcess = [...(instanceParams || [])];
+        let totalParamStackSize = 0;
+
+        // The last parameter is passed by register, others on the stack.
+        const lastParam = paramsToProcess.pop();
+        const paramsForStack = paramsToProcess;
+
+        // Pushing parameters (1 to N-1) happens before the JSR.
+        // The HCS12 PASCAL convention pushes left-to-right, meaning param1 is at the lowest stack address.
+        // To achieve this, we push them in reverse order (param N-1, then N-2, ... then 1).
+        if (paramsForStack.length > 0) {
+            queue.push({ explanation: `Caller: Pushing ${paramsForStack.length} parameter(s) for ${functionName} onto the stack.` });
+            [...paramsForStack].reverse().forEach(p => {
+                const size = getTypeSize(p.type);
+                totalParamStackSize += size;
+                queue.push({ 
+                    action: () => push(p.value, size, `Param: ${p.name}`, 'param'), 
+                    explanation: `PUSH Param: ${p.name} (${toHex(p.value, size*2)})` 
+                });
+            });
+        }
+
+        // Load the last parameter (if it exists) into the correct register.
+        if (lastParam) {
+            const { type, value, name } = lastParam;
+            let regName = '';
+            let action = () => {};
+            if (type === 'char') {
+                regName = 'B';
+                action = () => { registers.B = value & 0xFF; };
+            } else if (type === 'int') {
+                regName = 'D';
+                action = () => { 
+                    registers.A = (value >> 8) & 0xFF;
+                    registers.B = value & 0xFF;
+                };
+            } else if (type === 'long') {
+                regName = 'X:D';
+                action = () => {
+                    registers.X = (value >> 16) & 0xFFFF;
+                    registers.A = (value >> 8) & 0xFF;
+                    registers.B = value & 0xFF;
+                };
+            }
+            if(regName) {
+                queue.push({
+                    action: action,
+                    explanation: `Caller: Loading last param '${name}' into register ${regName}.`
+                });
+            }
+        }
+        
+        queue.push({ type: 'CALL', functionName: functionName, instanceParams: instanceParams });
+
+        // Cleaning up the stack (only for params that were pushed) happens after the function returns.
+        if (totalParamStackSize > 0) {
+            queue.push({ 
+                action: () => { deallocate(totalParamStackSize); },
+                explanation: `Caller cleans stack: LEAS ${totalParamStackSize},SP - Removing params for ${functionName}.`
+            });
+        }
+    }
+
+
+    function startSimulation() {
+        const entryFunctionName = callFunctionSelect.value;
+        if (!entryFunctionName) {
+            showErrorModal("No Function Selected", "Please select a function from the library to call.");
+            return;
+        }
+        
+        const entryFunctionDef = functionLibrary[entryFunctionName];
+        if (!entryFunctionDef) {
+             showErrorModal("Function Error", "Could not find definition for entry function.");
+             return;
+        }
+        
+        if (entryFunctionDef.params && entryFunctionDef.params.length > 0) {
+            showCallParamsModal(entryFunctionName, true); // true indicates initial call
+        } else {
+            actuallyStartSimulation(entryFunctionName, []);
+        }
+    }
+
+    function actuallyStartSimulation(functionName, instanceParams) {
+        resetSimulationState();
+        isSimulationRunning = true;
+
+        const mainContext = {
+            name: 'main()', type: 'main', pc: 0,
+            queue: [{ action: () => { registers.SP = STACK_START_ADDRESS; }, explanation: `LDS #${toHex(STACK_START_ADDRESS)}: Initialize Stack Pointer (EOS).` }]
+        };
+        
+        createFunctionCallSteps(mainContext.queue, functionName, instanceParams);
+        
+        mainContext.queue.push({
+            type: 'END_SIM',
+            explanation: 'main() has finished its tasks. Simulation complete.'
+        });
+
+        callStack.push(mainContext);
+        
+        setControlsEnabled(false);
+        stepBtn.disabled = false;
+        stepBtn.classList.remove('btn-disabled');
+        
+        updateExplanation('Simulation started. Press "Step" to advance.');
+        renderAll();
+    }
+
+
+    function doNextStep() {
+        if (!isSimulationRunning) return;
+
+        if (handleInterrupts()) {
+            renderAll();
+            updateExplanation(`Serviced highest priority interrupt. Continue stepping.`);
+            return;
+        }
+
+        if (callStack.length === 0) {
+            finishSimulation('Simulation complete: Call stack is empty.');
+            return;
+        }
+
+        const currentContext = callStack[callStack.length - 1];
+        if (currentContext.pc >= currentContext.queue.length) {
+            finishSimulation(`Error: Context '${currentContext.name}' ended without RTS/RTI.`);
+            callStack.pop();
+            renderAll();
+            return;
+        }
+
+        const step = currentContext.queue[currentContext.pc];
+        currentContext.pc++;
+
+        updateExplanation(step.explanation || 'Executing step...');
+        if (step.action) {
+            step.action();
+        } else {
+            handleSpecialStep(step);
+        }
+        
+        renderAll();
+
+        if (isSimulationRunning && callStack.length === 0) {
+            finishSimulation('Simulation finished.');
+        }
+    }
+
+    function handleSpecialStep(step) {
+        switch (step.type) {
+            case 'CALL':
+                callFunction(step.functionName, step.instanceParams);
+                break;
+            case 'RTS':
+                returnFromSubroutine();
+                break;
+            case 'RTI':
+                returnFromInterrupt();
+                break;
+            case 'END_SIM':
+                callStack.pop(); // Pop main
+                finishSimulation(step.explanation);
+                break;
+        }
+    }
+    
+    function finishSimulation(message) {
+        updateExplanation(message);
+        stepBtn.disabled = true;
+        stepBtn.classList.add('btn-disabled');
+        isSimulationRunning = false;
+        setControlsEnabled(true);
+    }
+
+    // --- Core Initialization Logic ---
+    function resetSimulationState() {
+        STACK_START_ADDRESS = parseInt(stackStartEl.value, 16) || 0x3F00;
+        STACK_BOTTOM_ADDRESS = STACK_START_ADDRESS - STACK_SIZE + 1;
+        
+        stack = Array(STACK_SIZE).fill(null).map((_, i) => ({
+            address: STACK_START_ADDRESS - i, value: 0, description: 'Empty', type: 'empty', size: 1
+        }));
+        registers = { SP: STACK_START_ADDRESS, PC: 0xC000, A: 0x00, B: 0x00, X: 0x0000, Y: 0x0000, CCR: 0x80 }; // S bit set
+        callStack = [];
+        pendingInterrupts = [];
+        isSimulationRunning = false;
+        
+        renderAll();
+        stepBtn.disabled = true;
+        stepBtn.classList.add('btn-disabled');
+        setControlsEnabled(true);
+        updateExplanation('Simulation reset. Ready for next action.');
+    }
+    
+    function init() {
+        functionLibrary = {};
+        
+        functionLibrary['myFunction'] = {
+            name: 'myFunction',
+            params: [],
+            body: [{ type: 'LOG', explanation: 'This is the default function.'}]
+        };
+
+        renderFunctionLibrary();
+        populateInterruptSelector();
+        resetSimulationState();
+    }
+
+    // --- Function Library UI ---
+    function renderFunctionLibrary() {
+        functionLibraryListEl.innerHTML = '';
+        callFunctionSelect.innerHTML = '';
+        
+        const funcNames = Object.keys(functionLibrary);
+
+        if (funcNames.length === 0) {
+            functionLibraryListEl.innerHTML = `<p class="text-sm text-gray-500 text-center">No functions defined.</p>`;
+            callFunctionSelect.disabled = true;
+            callSelectedFunctionBtn.disabled = true;
+            callSelectedFunctionBtn.classList.add('btn-disabled');
+        } else {
+             callFunctionSelect.disabled = false;
+             callSelectedFunctionBtn.disabled = false;
+             callSelectedFunctionBtn.classList.remove('btn-disabled');
+            funcNames.forEach(name => {
+                const funcEl = document.createElement('div');
+                funcEl.className = 'flex justify-between items-center bg-gray-700 p-2 rounded-md';
+                funcEl.innerHTML = `
+                    <span class="mono text-white">${name}</span>
+                    <div class="flex space-x-2">
+                        <button data-name="${name}" class="edit-func-btn text-blue-400 hover:text-blue-300 font-bold text-xs">EDIT</button>
+                        <button data-name="${name}" class="delete-func-btn text-red-400 hover:text-red-300 font-bold text-xs">DEL</button>
+                    </div>
+                `;
+                functionLibraryListEl.appendChild(funcEl);
+                
+                const callOption = document.createElement('option');
+                callOption.value = name;
+                callOption.textContent = name;
+                callFunctionSelect.appendChild(callOption);
+            });
+
+            document.querySelectorAll('.edit-func-btn').forEach(b => b.addEventListener('click', (e) => openFunctionModal(e.target.dataset.name)));
+            document.querySelectorAll('.delete-func-btn').forEach(b => b.addEventListener('click', (e) => {
+                delete functionLibrary[e.target.dataset.name];
+                renderFunctionLibrary();
+            }));
+        }
+        updateModalStepSelector();
+    }
+
+    function updateModalStepSelector() {
+        const funcNames = Object.keys(functionLibrary);
+        let currentFuncName = currentlyEditingFunction ? currentlyEditingFunction.name : null;
+        
+        modalAddStepSelect.innerHTML = `
+            <option value="LOG">Log Message</option>
+            <option value="DEFINE_VAR">Define Local Variable</option>
+        `;
+
+        const allPossibleCalls = [...funcNames];
+        if (currentFuncName && !allPossibleCalls.includes(currentFuncName)) {
+            allPossibleCalls.push(currentFuncName);
+        }
+
+        allPossibleCalls.forEach(name => {
+            const stepOption = document.createElement('option');
+            stepOption.value = `CALL:${name}`;
+            stepOption.textContent = `Call ${name}()`;
+            modalAddStepSelect.appendChild(stepOption);
+        });
+    }
+
+    // --- Modal Logic ---
+    function openFunctionModal(name = null) {
+        originalFunctionName = name;
+        if (name) {
+            functionModalTitleEl.textContent = `Edit Function: ${name}`;
+            currentlyEditingFunction = JSON.parse(JSON.stringify(functionLibrary[name]));
+        } else {
+            functionModalTitleEl.textContent = 'Add New Function';
+            currentlyEditingFunction = {
+                name: `func${Object.keys(functionLibrary).length + 1}`,
+                params: [],
+                body: [{ type: 'LOG', explanation: 'Function body is empty.'}]
+            };
+        }
+        modalFunctionNameEl.value = currentlyEditingFunction.name;
+        renderModalLists();
+        updateModalStepSelector();
+        functionModal.classList.remove('hidden');
+    }
+
+    function saveFunctionFromModal() {
+        const newName = modalFunctionNameEl.value.trim();
+        if (!newName) {
+            showErrorModal("Invalid Name", "Function name cannot be empty.");
+            return;
+        }
+        if (newName !== originalFunctionName && functionLibrary[newName]) {
+            showErrorModal("Name Exists", `A function named '${newName}' already exists.`);
+            return;
+        }
+
+        currentlyEditingFunction.name = newName;
+        
+        if (originalFunctionName && originalFunctionName !== newName) {
+            delete functionLibrary[originalFunctionName];
+        }
+
+        functionLibrary[newName] = currentlyEditingFunction;
+        closeFunctionModal();
+        renderFunctionLibrary();
+    }
+
+    function closeFunctionModal() {
+        functionModal.classList.add('hidden');
+        currentlyEditingFunction = null;
+        originalFunctionName = null;
+    }
+    
+    function renderModalLists() {
+        renderModalList(modalParamListEl, currentlyEditingFunction.params, 'parameter');
+        renderModalList(modalBodyListEl, currentlyEditingFunction.body, 'body-step');
+    }
+
+    function renderModalList(listEl, list, type) {
+        listEl.innerHTML = '';
+        if (list.length === 0) {
+            listEl.innerHTML = `<p class="text-xs text-gray-500 text-center p-4">Empty</p>`;
+        } else {
+            list.forEach((item, index) => {
+                const pEl = document.createElement('div');
+                pEl.className = 'flex justify-between items-center bg-gray-700 p-2 rounded-md text-sm';
+                let content = '';
+                if (type === 'parameter') {
+                    content = `<span class="text-blue-300">${item.type}</span> <span class="text-white">${item.name}</span>`;
+                } else if (type === 'body-step') {
+                     switch(item.type) {
+                         case 'CALL':
+                             const paramsString = item.instanceParams.map(p => `${p.name}=${toHex(p.value, getTypeSize(p.type)*2)}`).join(', ');
+                             content = `<span class="text-purple-300">CALL</span> <span class="text-white truncate">${item.functionName}(${paramsString})</span>`;
+                             break;
+                         case 'LOG':
+                             content = `<span class="text-gray-400">LOG:</span> <span class="text-white truncate">"${item.explanation}"</span>`;
+                             break;
+                         case 'DEFINE_VAR':
+                             content = `<span class="text-green-400">VAR</span> <span class="text-white">${item.varType} ${item.name} = ${toHex(item.value, getTypeSize(item.varType)*2)};</span>`;
+                             break;
+                     }
+                }
+                
+                pEl.innerHTML = `<div class="mono truncate pr-2">${content}</div><button data-index="${index}" class="remove-modal-item-btn text-red-400 hover:text-red-600 font-bold" data-type="${type}">✖</button>`;
+                listEl.appendChild(pEl);
+            });
+        }
+        document.querySelectorAll('.remove-modal-item-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(e.target.dataset.index, 10);
+                const type = e.target.dataset.type;
+                if(type === 'parameter') currentlyEditingFunction.params.splice(index, 1);
+                if(type === 'body-step') currentlyEditingFunction.body.splice(index, 1);
+                renderModalLists();
+            })
+        });
+    }
+
+    function showCallParamsModal(functionName, isInitialCall = false) {
+        const funcDef = functionLibrary[functionName] || (functionName === currentlyEditingFunction.name ? currentlyEditingFunction : null);
+        
+        if (!funcDef || !funcDef.params || funcDef.params.length === 0) {
+            if (isInitialCall) {
+                actuallyStartSimulation(functionName, []);
+            } else {
+                currentlyEditingFunction.body.push({ type: 'CALL', functionName: functionName, instanceParams: [] });
+                renderModalLists();
+            }
+            return;
+        }
+
+        _isSettingInitialCall = isInitialCall;
+        tempCallStep = { type: 'CALL', functionName: functionName, instanceParams: [] };
+        
+        callParamsModalTitleEl.textContent = `Set Parameters for call to ${functionName}()`;
+        callParamsListEl.innerHTML = '';
+        funcDef.params.forEach((param) => {
+            const paramEl = document.createElement('div');
+            paramEl.innerHTML = `
+                <label class="block text-sm font-medium text-gray-300">${param.name} (${param.type})</label>
+                <div class="flex items-center space-x-2 mt-1">
+                    <select class="param-instance-format-select w-1/3 block bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white">
+                        <option value="hex" selected>Hex</option>
+                        <option value="dec">Decimal</option>
+                        <option value="bin">Binary</option>
+                    </select>
+                    <input type="text" data-param-name="${param.name}" data-param-type="${param.type}" class="param-instance-value-input mono block w-2/3 bg-gray-700 border-gray-600 rounded-md shadow-sm p-2 text-white" value="0">
+                </div>
+            `;
+            callParamsListEl.appendChild(paramEl);
+        });
+
+        callParamsModal.classList.remove('hidden');
+    }
+    
+    function openVariableEditor(mode) {
+        variableEditorMode = mode;
+        variableEditorTitleEl.textContent = mode === 'param' ? 'Define Parameter' : 'Define Local Variable';
+        variableEditorNameEl.value = mode === 'param' ? `param${currentlyEditingFunction.params.length + 1}` : `var${currentlyEditingFunction.body.filter(s=>s.type === 'DEFINE_VAR').length + 1}`;
+        variableEditorTypeEl.value = 'int';
+        
+        if (mode === 'param') {
+            variableEditorValueGroup.style.display = 'none';
+        } else {
+            variableEditorValueGroup.style.display = 'block';
+            updateVariableEditorDefaultValue();
+        }
+
+        variableEditorModal.classList.remove('hidden');
+    }
+
+    function updateVariableEditorDefaultValue() {
+        const type = variableEditorTypeEl.value;
+        const format = variableEditorFormatEl.value;
+        let defaultValue = '';
+
+        if (type === 'char') {
+            if (format === 'hex') defaultValue = 'C5';
+            else if (format === 'dec') defaultValue = '-59';
+            else if (format === 'bin') defaultValue = '11000101';
+        } else if (type === 'int') {
+            if (format === 'hex') defaultValue = 'BEEF';
+            else if (format === 'dec') defaultValue = '-16657';
+            else if (format === 'bin') defaultValue = '1011111011101111';
+        } else if (type === 'long') {
+            if (format === 'hex') defaultValue = 'DEADC0DE';
+            else if (format === 'dec') defaultValue = '-559035650';
+            else if (format === 'bin') defaultValue = '11011110101011011100000011011110';
+        }
+        variableEditorValueEl.value = defaultValue;
+    }
+
+
+    // --- Event Listeners ---
+    addFunctionBtn.addEventListener('click', () => openFunctionModal());
+    cancelFunctionModalBtn.addEventListener('click', closeFunctionModal);
+    saveFunctionModalBtn.addEventListener('click', saveFunctionFromModal);
+    
+    modalAddParamBtn.addEventListener('click', () => {
+        openVariableEditor('param');
+    });
+    
+    modalAddStepBtn.addEventListener('click', () => {
+        const selected = modalAddStepSelect.value;
+        if (selected.startsWith('CALL:')) {
+            const funcName = selected.split(':')[1];
+            showCallParamsModal(funcName, false); // false because this is a nested call
+        } else if (selected === 'DEFINE_VAR') {
+            openVariableEditor('local');
+        } else if (selected === 'LOG') {
+            logMessageInput.value = "Doing some work...";
+            logMessageModal.classList.remove('hidden');
+        }
+    });
+    
+    cancelVariableEditorBtn.addEventListener('click', () => variableEditorModal.classList.add('hidden'));
+    variableEditorTypeEl.addEventListener('change', updateVariableEditorDefaultValue);
+    variableEditorFormatEl.addEventListener('change', updateVariableEditorDefaultValue);
+    saveVariableEditorBtn.addEventListener('click', () => {
+        const name = variableEditorNameEl.value.trim();
+        const type = variableEditorTypeEl.value;
+        if (!name) {
+            showErrorModal("Invalid Name", "Variable name cannot be empty.");
+            return;
+        }
+
+        if (variableEditorMode === 'param') {
+            currentlyEditingFunction.params.push({ name: name, type: type });
+            renderModalLists();
+            variableEditorModal.classList.add('hidden');
+        } else { // 'local'
+            try {
+                const format = variableEditorFormatEl.value;
+                const valueStr = variableEditorValueEl.value;
+                const radix = { hex: 16, dec: 10, bin: 2 }[format];
+                let value = (format === 'dec') ? parseInt(valueStr, 10) : parseInt(valueStr.replace(/[^0-9a-fA-F]/g, ''), radix);
+
+                if (isNaN(value)) throw new Error("Invalid number format.");
+
+                const size = getTypeSize(type);
+                const bits = size * 8;
+                const maxUnsignedValue = Math.pow(2, bits) - 1;
+                const minSignedValue = -Math.pow(2, bits - 1);
+
+                if (value < minSignedValue || value > maxUnsignedValue) throw new Error(`Value is out of range for type '${type}'.`);
+                
+                if (value < 0) value = Math.pow(2, bits) + value;
+                
+                currentlyEditingFunction.body.push({ type: 'DEFINE_VAR', name: name, varType: type, value: value });
+                renderModalLists();
+                variableEditorModal.classList.add('hidden');
+            } catch(error) {
+                showErrorModal("Invalid Variable Value", error.message);
+            }
+        }
+    });
+
+    cancelCallParamsBtn.addEventListener('click', () => {
+        callParamsModal.classList.add('hidden');
+        tempCallStep = null;
+        _isSettingInitialCall = false;
+    });
+
+    saveCallParamsBtn.addEventListener('click', () => {
+        const funcDef = functionLibrary[tempCallStep.functionName] || (tempCallStep.functionName === currentlyEditingFunction.name ? currentlyEditingFunction : null);
+        const inputs = callParamsListEl.querySelectorAll('.param-instance-value-input');
+        const formatSelects = callParamsListEl.querySelectorAll('.param-instance-format-select');
+        let allValid = true;
+        tempCallStep.instanceParams = [];
+
+        try {
+            funcDef.params.forEach((param, index) => {
+                const valueStr = inputs[index].value;
+                const format = formatSelects[index].value;
+                const radix = { hex: 16, dec: 10, bin: 2 }[format];
+                let value = (format === 'dec') ? parseInt(valueStr, 10) : parseInt(valueStr.replace(/[^0-9a-fA-F]/g, ''), radix);
+
+                if (isNaN(value)) throw new Error(`Invalid number format for parameter '${param.name}'.`);
+                
+                const size = getTypeSize(param.type);
+                const bits = size * 8;
+                const maxUnsignedValue = Math.pow(2, bits) - 1;
+                const minSignedValue = -Math.pow(2, bits - 1);
+
+                if (value < minSignedValue || value > maxUnsignedValue) throw new Error(`Value for '${param.name}' is out of range for type '${param.type}'.`);
+                
+                if (value < 0) value = Math.pow(2, bits) + value;
+
+                tempCallStep.instanceParams.push({ name: param.name, type: param.type, value: value });
+            });
+        } catch(error) {
+            allValid = false;
+            showErrorModal("Invalid Parameter Value", error.message);
+        }
+
+        if (allValid) {
+            if (_isSettingInitialCall) {
+                actuallyStartSimulation(tempCallStep.functionName, tempCallStep.instanceParams);
+            } else {
+                currentlyEditingFunction.body.push(tempCallStep);
+                renderModalLists();
+            }
+            callParamsModal.classList.add('hidden');
+            tempCallStep = null;
+            _isSettingInitialCall = false;
+        }
+    });
+
+    // New Log Message Modal Listeners
+    cancelLogMessageBtn.addEventListener('click', () => {
+        logMessageModal.classList.add('hidden');
+    });
+
+    saveLogMessageBtn.addEventListener('click', () => {
+        const message = logMessageInput.value;
+        if (currentlyEditingFunction) {
+            currentlyEditingFunction.body.push({ type: 'LOG', explanation: message });
+            renderModalLists();
+        }
+        logMessageModal.classList.add('hidden');
+    });
+
+
+    callSelectedFunctionBtn.addEventListener('click', startSimulation);
+    requestInterruptBtn.addEventListener('click', () => requestInterrupt(interruptSelect.value));
+    
+    stepBtn.addEventListener('click', doNextStep);
+    resetBtn.addEventListener('click', resetSimulationState);
+    clearAllBtn.addEventListener('click', init);
+    closeErrorModalBtn.addEventListener('click', () => errorModal.classList.add('hidden'));
+
+    // --- Initial Load ---
+    init();
+});
+</script>
+
+</body>
+</html>
