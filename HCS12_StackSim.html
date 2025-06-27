@@ -550,8 +550,9 @@ document.addEventListener('DOMContentLoaded', () => {
             finishSimulation("Stack Overflow!");
             return false;
         }
+        registers.SP -= (size + 1);
         for (let i = 0; i < size; i++) {
-            registers.SP--;
+            registers.SP++;
             const stackIndex = STACK_START_ADDRESS - registers.SP;
             const byteValue = (value >>> (8 * (size - 1 - i))) & 0xFF;
             if (stack[stackIndex]) {
@@ -564,6 +565,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             }
         }
+        registers.SP -= (size-1);
         return true;
     }
 
@@ -574,6 +576,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return 0;
         }
         let value = 0;
+        registers.SP += (size-1);
         for (let i = 0; i < size; i++) {
             const stackIndex = STACK_START_ADDRESS - registers.SP;
             if (stack[stackIndex]) {
@@ -582,8 +585,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 stack[stackIndex].type = 'empty';
                 stack[stackIndex].size = 1;
             }
-            registers.SP++;
+            registers.SP--;
         }
+        registers.SP += (size+1);
         return value;
     }
 
